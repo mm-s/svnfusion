@@ -1,0 +1,18 @@
+#!/bin/sh 
+
+for i in `find $1 -depth -maxdepth 1 -type d -regex "$1/[a-zA-Z0-9_].*"`;
+do
+
+name=`echo $i | sed "s#.*/\(.*\)#\1#g"`
+
+cat exclude | grep $name > /dev/null
+r=$?
+if [ "x$r" == "x0" ]; then
+  continue
+fi
+
+echo hotcopying $i
+svnadmin hotcopy $i src/$name
+
+done
+

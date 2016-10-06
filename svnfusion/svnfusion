@@ -1,0 +1,343 @@
+#!/bin/bash
+
+go=$1
+if [ "x$go" != "xgo" ]; then
+
+echo "SVNfusion version 1.1"
+echo "copyleft 2008 Marcos Mayorga - mayorga.geek@gmail.com"
+echo "merges subversion repositories under ./src directory, preserving the revision historial in chronological order"
+echo "this software is released under the GNU GPL v2.0 license and comes with absolutelly no guaratee"
+echo "make backup copies of your data before using this tool"
+echo
+echo "visit the project home page at http://svnfusion.sf.net for latest versions"
+echo
+echo "usage:"
+echo "1 - place a copy of your subversion repositories under the src directory"
+echo "2 - type:"
+echo "\$ svnfusion go
+echo "3 - wait and find your new merged subversion repository called newrep, feel free to rename it.
+echo
+exit 0
+fi
+
+rm -rf work
+revsroot=work/revs
+mkdir -p $revsroot
+
+here=`pwd`
+
+for repodir in `find src -depth -maxdepth 1 -type d -regex "src/[a-zA-Z0-9_].*"`; 
+do
+  prjname=`echo $repodir | sed "s#src/##"`
+  repourl=file://$here/$repodir
+  lastrev=`svnlook youngest $repodir`
+
+  for ((rev=1;rev<=$lastrev;rev+=1)); do
+    echo $prjname - r$rev
+
+    rdate=`svnlook date -r$rev $repodir | sed "s/ //g" | sed s/\(.*\)//g`
+
+    rdir=$revsroot/$rdate/$prjname
+    mkdir -p "$rdir"
+    echo "" >> "$rdir/$rev"
+  done
+done
+
+
+cd work
+# --------------------------------------------------------------
+# the directory where all revisions are referenced as date/project/rev
+# --------------------------------------------------------------
+revsroot=revs
+# --------------------------------------------------------------
+
+# --------------------------------------------------------------
+# cleaning
+# --------------------------------------------------------------
+rm -rf revmap
+rm -rf dump
+rm -rf proc_info
+mkdir revmap
+mkdir -p dump
+mkdir proc_info
+# --------------------------------------------------------------
+
+
+# --------------------------------------------------------------
+# paths_in_rep auxiliar file contains all the 1st level paths already created in the repository
+# --------------------------------------------------------------
+#echo "trunk" | md5sum | sed s#\\ \\-#1 trunk# > paths_in_rep
+#echo "tags" | md5sum | sed s#\\ \\-#1 tags# >> paths_in_rep
+#echo "branches" | md5sum | sed s#\\ \\-#1 branches# >> paths_in_rep
+echo "trunk" > paths_in_rep
+echo "tags" >> paths_in_rep
+echo "branches" >> paths_in_rep
+# --------------------------------------------------------------
+
+
+# --------------------------------------------------------------
+# gather all the original revisions, and prepare at the same time some directories needed below
+# --------------------------------------------------------------
+if [ "0" == "0" ]; then
+
+rm -rf dump_original
+mkdir dump_original
+echo gathering revisions of the date $daterevsdir
+for daterevsdir in `ls -1 $revsroot | sort`;do
+echo $daterevsdir
+for prjname in `ls -1 $revsroot/$daterevsdir | sort`;do
+for rev in `ls -1 $revsroot/$daterevsdir/$prjname | sort`;do
+  mkdir -p dump_original/$prjname
+  svnadmin dump -r$rev --incremental -q ../src/$prjname > r
+  cp r dump_original/$prjname/$rev
+done
+done
+done
+
+fi
+
+
+
+# --------------------------------------------------------------
+
+
+# --------------------------------------------------------------
+# variable indicationg the actual new repository revision
+# --------------------------------------------------------------
+let newrev=1
+# --------------------------------------------------------------
+
+
+
+# --------------------------------------------------------------
+# empty repository creation, copied from skeleton at rev 1 with trunk,tags and branches set up)
+# --------------------------------------------------------------
+rm -rf newrep
+tar -xzf ../rep_skel.tar.gz 
+mv rep_skel newrep
+# --------------------------------------------------------------
+
+
+
+
+# --------------------------------------------------------------
+# iterate throughout all obtained original revisions to patch them
+# --------------------------------------------------------------
+
+for daterevsdir in `ls -1 $revsroot | sort`;do
+for prjname in `ls -1 $revsroot/$daterevsdir | sort`;do
+for rev in `ls -1 $revsroot/$daterevsdir/$prjname | sort`;do
+
+  # --------------------------------------------------------------
+  # increase the next new revision
+  # --------------------------------------------------------------
+  let newrev=newrev+1
+  # --------------------------------------------------------------
+
+
+  # --------------------------------------------------------------
+  # save a copy of the original revision dump for future check in case of failure
+  # --------------------------------------------------------------
+  cp dump_original/$prjname/$rev r
+
+
+  # --------------------------------------------------------------
+  # remove all node creation instrucion of tags ans branches, we've got it already, tipically occur in rev2, trunk is ok because we will rewrite the node creation in awhile
+  # --------------------------------------------------------------
+  ../filter_rootdir_creation r tags
+  ../filter_rootdir_creation r branches
+  # --------------------------------------------------------------
+
+
+  # --------------------------------------------------------------
+  # if we have removed all operations with nodes we deal with an empty change revision, so we discard it without advance the new revision number
+  # --------------------------------------------------------------
+cat r | grep "Node-path:" > /dev/null
+r=$?
+if [ "x$r" != "x0" ]; then
+  let newrev=newrev-1
+  echo "$prjname-$rev discarded" >> revmap/index
+  mkdir -p revmap/$prjname
+  echo "discarded" > revmap/$prjname/$rev
+  echo "discarded (after filtering root node creation) empty revision $prjname-$rev"
+else
+  # --------------------------------------------------------------
+  # all node paths under [branches|tags]/something are rewritten as [branches|tags]/project/something
+  # --------------------------------------------------------------
+  cat r | sed "s#Node\\(.*\\)-path: branches/\\([ 0-9A-Za-z_\\.\\-]*\\)\\(.*\\)#Node\\1-path: branches/\\2/$prjname\\3#" > 1
+  cat 1 | sed "s#Node\\(.*\\)-path: tags/\\([ 0-9A-Za-z_\\.\\-]*\\)\\(.*\\)#Node\\1-path: tags/\\2/$prjname\\3#" > 2
+
+  # all node paths under trunk are rewritten as trunk/project
+  cat 2 | sed "s#Node\\(.*\\)-path: trunk\\(.*\\)#Node\\1-path: trunk/$prjname\\2#" > 3
+  # --------------------------------------------------------------
+
+
+  # --------------------------------------------------------------
+  #other directories/filenames directly under / are rewritten as /name_project
+  # --------------------------------------------------------------
+  #search them:
+  cat 3 | grep "\-path:" > otherrootdirs0
+  cat otherrootdirs0 | grep -v "\-path: trunk" > otherrootdirs
+  cat otherrootdirs  | grep -v "\-path: branches" > otherrootdirs2
+  cat otherrootdirs2 | grep -v "\-path: tags" > otherrootdirs
+
+  cat otherrootdirs  | sed "s#\\(^.*path: \\)\\([ 0-9A-Za-z_\\.\\-]*\\)/\\(.*\\)#\\1\\2_$prjname/\\3#"  > otherrootdirs2
+  cat otherrootdirs2 | sed "s#\\(^.*path: \\)\\([ 0-9A-Za-z_\\.\\-]*\\)\$#\\2#" | grep -v "Binary file" | sort | uniq > otherrootdirs
+  mkdir -p proc_info/$prjname
+  cp otherrootdirs proc_info/$prjname/found_at_root_$rev
+
+  #apply suffix to them
+  for ord in `cat otherrootdirs`;
+  do
+      pulu="s#\\(^.*path: \\)$ord#\\1${ord}_$prjname#"
+      cat 3 | sed "$pulu" > 4
+      cp 4 3
+  done
+  # --------------------------------------------------------------
+
+
+
+  # --------------------------------------------------------------
+  # put the patched file inside dump
+  # --------------------------------------------------------------
+  rm -f dump/waiting
+  mv 3 dump/waiting
+  # --------------------------------------------------------------
+
+
+  # --------------------------------------------------------------
+  # problem with [tags|branches] exclusively. We have never created [tags|branches]/name (all old references to creation were tags/name and we patched with tags/name/project, but who created tags/name? nobody, we must add a creation node only once just before the first reference found
+  # --------------------------------------------------------------
+#  fromrev=$newrev
+  cat dump/waiting | grep "Node-path: " | grep -v "path: trunk" | grep -v "path: branches" | sed "s#Node-path: \(tags/[ a-zA-Z0-9_\\.\\-]*\)/.*#\1#" > nps0
+  cat dump/waiting | grep "Node-path: " | grep -v "path: trunk" | grep -v "path: tags" | sed "s#Node-path: \(branches/[ a-zA-Z0-9_\\.\\-]*\)/.*#\1#" >> nps0
+  cat nps0 | grep -v "Binary file" > nps1
+  cat nps1 | grep -v "Node-path:" > nps
+  for np in `sort nps | uniq`;
+  do
+    #echo "-->$np"
+    cat paths_in_rep | grep $np > /dev/null
+    r=$?
+    if [ "x$r" != "x0" ]; then
+      if [ "x$np" != "x" ]; then
+        cat dump/waiting | grep "Node-path: $np\$" >/dev/null
+        r=$?
+        if [ "x$r" != "x0" ]; then
+          cat ../newdir_template | sed "s#therevisionnumber#$newrev#" > 1
+          cat 1 | sed "s#\\(.*\\)thenewpath#\\1$np#" > 2
+          echo "$newrev = directory creation" >> revmap/index
+          cp 2 dump/$newrev
+#	  if [ "$fromrev" != "x" ]; then
+#	    fromrev="x"
+#  	    mkdir -p revmap/$prjname
+#	    echo $newrev > revmap/$prjname/$rev
+#	  fi
+
+
+          # --------------------------------------------------------------
+          # load it!
+          # --------------------------------------------------------------
+          cat dump/$newrev | svnadmin load newrep
+	  r=$?
+	  if [ "x$r" != "x0" ]; then
+	    echo
+	    echo "*-**************** error"
+	    exit 1
+	  fi
+          # --------------------------------------------------------------
+
+	  echo $np >> paths_in_rep
+
+          let newrev=newrev+1
+        fi
+      fi
+    fi
+  done
+  # --------------------------------------------------------------
+
+  # --------------------------------------------------------------
+  # update revision map, used for next revisions when cross reference back
+  # --------------------------------------------------------------
+  echo "$newrev = $prjname-$rev"
+  echo "$newrev=$prjname-$rev" >> revmap/index
+  mkdir -p revmap/$prjname
+  echo $newrev > revmap/$prjname/$rev
+  # --------------------------------------------------------------
+
+
+
+  # --------------------------------------------------------------
+  # cross references to previous version must be resolved, (project,oldrev)-->newrev
+  # --------------------------------------------------------------
+  cp dump/waiting cpfrm
+  cat cpfrm | grep "Node-copyfrom-rev:" | sed "s#Node-copyfrom-rev: \\(.*\\)#\\1#" > copyfroms
+  for cf0 in `sort copyfroms | uniq`;
+  do
+    let cf=$cf0
+    newcf=`cat revmap/$prjname/$cf`
+    while [ "x$newcf" == "xdiscarded" ]; do
+      let cf=cf-1
+      newcf=`cat revmap/$prjname/$cf`
+      r=$?
+      if [ "x$r" != "x0" ]; then
+	echo "Error: revision revmap/$prjname/$cf not found  (discarded original revision is $cf0)"
+	exit 1
+      fi
+    done
+    cat cpfrm > cpfrm_c
+    echo "source croosrep $cf0 replaced by $newcf"
+    cat cpfrm_c | sed "s#Node-copyfrom-rev: $cf0\$#Node-copyfrom-rev: $newcf#" > cpfrm
+  done
+  cp cpfrm dump/waiting
+  # --------------------------------------------------------------
+
+
+
+  # --------------------------------------------------------------
+  # path the revision stamp 
+  # --------------------------------------------------------------
+  cat dump/waiting | sed "s#Revision-number: .*#Revision-number: $newrev#" > dump/$newrev
+  # --------------------------------------------------------------
+
+  # --------------------------------------------------------------
+  # load it!
+  # --------------------------------------------------------------
+  cat dump/$newrev | svnadmin load newrep
+  r=$?
+  if [ "x$r" != "x0" ]; then
+    echo
+    echo "****************** error"
+    exit 1
+  fi
+  # --------------------------------------------------------------
+	
+
+fi
+
+
+done
+done
+done
+
+rm ../newrep -rf
+mv newrep ..
+cd ..
+
+# --------------------------------------------------------------
+# the best message you could look forward
+# --------------------------------------------------------------
+echo "                  **************"
+echo "                  success, W00t!"
+echo "                  **************"
+echo "find your new merged repository here with name 'newrep'"
+echo ""
+echo "please *donate* if you found this software useful."
+echo "        http://svnfusion.sourceforge.net"
+echo ""
+echo "Thank you"
+echo "Developed by: Marcos Mayorga\'2008 - mayorga.geek@gmail.com"
+echo ""
+# --------------------------------------------------------------
+
+exit 0
+

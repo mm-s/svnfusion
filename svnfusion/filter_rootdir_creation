@@ -1,0 +1,19 @@
+#!/bin/bash
+
+file=$1
+dirname=$2
+
+cat $file | grep -n -A6 "Node-path: $dirname\$" | grep -A3 "Node-kind: dir" | grep "Node-action: add" >/dev/null
+r=$?
+if [ "x$r" == "x0" ]; then
+ line=`cat $file | grep -n "Node-path: $dirname\$" | sed "s/\\([0-9]*\\):.*/\\1/"`
+ let "line -= 1"
+ head $file -n$line > filehead
+ let "line += 8"
+ tail $file -n+$line > filetail
+ cat filehead > $file
+ cat filetail >> $file
+
+fi
+
+

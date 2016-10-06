@@ -1,0 +1,31 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 4bf72bcd-185d-4b26-8060-1efac0b68ffe
+
+Revision-number: therevisionnumber
+Prop-content-length: 100
+Content-length: 100
+
+K 7
+svn:log
+V 0
+
+K 10
+svn:author
+V 6
+marcos
+K 8
+svn:date
+V 27
+2008-10-28T23:06:59.646572Z
+PROPS-END
+
+Node-path: thenewpath
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+

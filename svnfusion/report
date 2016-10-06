@@ -1,0 +1,43 @@
+#!/bin/sh 
+
+dt=`date`
+
+co="#EE6060"
+cn="#60EE60"
+
+echo "
+<html>
+<head>
+</head>
+<body>
+<h1>svnfusion repository consolidation report</h1>
+<h2>$dt</h2>
+<table border=1>
+<tr>
+<tr><th bgcolor=$co>previous revision</th><th bgcolor=$cn>new revision</th></tr>
+"
+
+cat work/revmap/index | sed "s~\(.*\)=\(.*\)\$~\<tr\>\<td bgcolor=$co\>\2\</td\>\<td bgcolor=$cn\>\1\</td\>\</tr\>~" | sort
+
+echo "
+</table>
+
+
+<table border=1>
+<tr>
+<tr><th bgcolor=$cn>new revision</th><th bgcolor=$co>previous revision</th></tr>
+"
+
+cat work/revmap/index | sed "s~\(.*\)=\(.*\)\$~\<tr\>\<td bgcolor=$cn\>\1\</td\>\<td bgcolor=$co\>\2\</td\>\</tr\>~"
+
+
+
+
+echo "
+</table>
+
+
+</body>
+</html>
+"
+
